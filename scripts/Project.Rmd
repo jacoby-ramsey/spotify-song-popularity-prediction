@@ -1,0 +1,589 @@
+---
+title: "Final Project - Spotify Popularity Song Prediction"
+author: "Team 1"
+date: "2026-04-02"
+output:
+  html_document:
+    code_folding: hide
+    theme:
+      version: 5
+      bg: "#121212"
+      fg: "#F5F5F5"
+      primary: "#1DB954"
+      secondary: "#191414"
+      code_font:
+        google: "Fira Code"
+      base_font:
+        google: "Inter"
+      heading_font:
+        google: "Inter"
+    highlight: tango
+    css: styles.css
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+#load libraries and set theme with Spotify colors
+library(janitor)
+library(dplyr)
+library(caret)
+library(C50)
+library(class)
+library(randomForest)
+library(neuralnet)
+library(kernlab)
+library(ggplot2)
+
+theme_spotify <- function() {
+  theme_minimal(base_size = 12) +
+    theme(
+      plot.background = element_rect(fill = "#121212", color = NA),
+      panel.background = element_rect(fill = "#181818", color = NA),
+      panel.border = element_blank(),
+      panel.grid.major = element_line(color = "#2A2A2A", linewidth = 0.4),
+      panel.grid.minor = element_blank(),
+      axis.text = element_text(color = "#B3B3B3"),
+      axis.title = element_text(color = "#F5F5F5", face = "bold"),
+      plot.title = element_text(color = "#1DB954", face = "bold", size = 16),
+      plot.subtitle = element_text(color = "#D9D9D9", size = 11),
+      plot.caption = element_text(color = "#B3B3B3", size = 9),
+      legend.background = element_rect(fill = "#181818", color = NA),
+      legend.box.background = element_rect(fill = "#181818", color = NA),
+      legend.key = element_rect(fill = "#181818", color = NA),
+      legend.text = element_text(color = "#F5F5F5"),
+      legend.title = element_text(color = "#1DB954", face = "bold"),
+      strip.background = element_rect(fill = "#1DB954", color = NA),
+      strip.text = element_text(color = "#121212", face = "bold")
+    )
+}
+```
+
+### Introduction
+
+The purpose of this project is to predict whether a Spotify song will be classified as popular or not popular using measurable song characteristics. In a business setting, this type of model can help music platforms, production companies, and music marketers understand which song attributes are associated with stronger audience appeal. The analysis uses data obtained from [insert source] and machine learning techniques to identify patterns linked to popularity outcomes.
+
+The predicting factors in this project are the song-level variables that may help explain popularity, such as acousticness, danceability, energy, loudness, speechiness, valence, tempo, and genre-related indicators. These variables capture different dimensions of how a song sounds, feels, and is categorized, making them reasonable candidates for a popularity prediction task. The intent is to test whether combinations of these musical features can separate more popular songs from less popular ones.
+
+We begin by building several first-level classification models, including logistic regression, k-nearest neighbors (kNN), decision trees, random forests, artificial neural networks (ANN), and support vector machines (SVM). Beyond the first-level models, we implement a stacked modeling approach. Specifically, we use the predicted probabilities from the first-level models as inputs into a second-level model. This stacked model is estimated using a decision tree framework, allowing it to learn how to optimally combine the strengths of the individual models. 
+
+From a managerial perspective, we place greater emphasis on correctly identifying popular songs than on avoiding false positives. Missing a truly popular song may lead to lost opportunities for recommendation exposure, playlist placement, and user engagement, whereas overestimating a song’s popularity results in relatively smaller inefficiencies. 
+
+### Getting Data
+
+The dataset used in this analysis contains a wide range of Spotify song-level characteristics for 232,725 songs. Each observation represents an individual track and includes information on genre, as well as several acoustic features such as danceability, energy, loudness, tempo, valence, and instrumentalness. I
+
+The primary outcome variable is a song’s popularity score, which reflects its relative performance on the platform. To frame this as a classification problem, we convert the continuous popularity measure into a binary variable, where songs with popularity at or above the median are labeled as “popular,” and those below the median are labeled as “not popular.” 
+
+```{r}
+spotify <- read.csv("SpotifyFeatures.csv", stringsAsFactors = TRUE)
+```
+
+### Processing and Cleaning Data
+
+Prior to modeling, we perform several data preparation steps. We check for missing values and find none in the data set.We remove unique identifiers such as track ID and track name, as these variables do not provide predictive value. We also remove artist name from the dataset. We acknowledge that artist can be a valuable variable in determinig a song’s popularity, but due to the to complexity of adding several unique dummy variables in the analysis to cover each unique artist, we determined it was best to remove it. Doing so also ensures that we rely on the characteristics of the song, rather than the artists themselves.
+
+We also convert categorical variables, including genre and musical attributes, into dummy variables to enable their use in machine learning models. Finally, for models sensitive to feature scale, such as kNN, neural networks, and SVM, we apply min-max normalization to ensure that all predictors are on a comparable scale.
+
+We also change our variable of interest, popularity. A key transformation in this dataset is converting popular into a binary variable. Converting the outcome to a binary classification ultimately allows us to to compare our models across each other via confusion matrices that describe their accruacy, kappa, specificity, and sensitivity. For this study, we calculate the median popularity and use this as the threshold. Anything at or above the median is considered popular (1) in our original dataset, everything else is considered not popular (0).
+
+
+```{r}
+summary(spotify)
+str(spotify)
+
+#checking for NAs
+colSums(is.na(spotify))
+
+#remove unique ID
+spotify$track_id <- NULL
+spotify$track_name <- NULL
+#saving as separate vector in case want to integrate
+artistname <- spotify$artist_name
+spotify$artist_name <- NULL
+
+#make factors into dummies
+spotify_dummy <- as.data.frame(model.matrix(~ . -1, data=spotify))
+
+#clean names
+spotify_dummy <- clean_names(spotify_dummy)
+```
+```{r}
+median_popularity <- median(spotify$popularity, na.rm = TRUE)
+
+#create a new binary variable called popular_binary - a song gets value 1 if its popularity is at or above the median and it gets value 0 if its popularity is below the median
+spotify_dummy <- spotify_dummy %>%
+  mutate(popular_binary = if_else(popularity >= median_popularity, 1, 0)) %>%
+  select(-popularity)
+
+#creating a function for min-max scaling
+minmax <- function(x) {
+  (x-min(x))/(max(x)-min(x))
+}
+
+#applying minmax function to every column of the  data except y and saving as a new data_frame
+spotify_scale <- spotify_dummy
+spotify_scale <- as.data.frame(lapply(spotify_scale, minmax))
+```
+
+### Examining Data
+
+
+Before we continue, it would be helpful to further examine our data to understand its underlying trends. The purpose of this is to better understand the characteristics of the data before moving into predictive modeling. The code checks whether the target classes are balanced, reviews the composition of the genre variable, and visualizes how song features vary across categories. 
+
+First, we examine class balance. The table shows that there are 114,070 "not popular" (0) songs and 118,655 "popular" (1) songs, which corresponds to proportions of 49.0% and 51.0%, respectively.
+
+```{r}
+table(spotify_dummy$popular_binary)
+prop.table(table(spotify_dummy$popular_binary))
+```
+Second, we examing the summary statistics. The output shows that the median danceability is 0.571, median energy is 0.605, median loudness is about -7.76, and median duration is about 220,427 milliseconds, or roughly 3.7 minutes. These values suggest the dataset is centered on songs with moderate-to-high rhythmic accessibility and energy, while still covering a broad range from very acoustic to highly energetic tracks.
+
+```{r}
+summary(
+  spotify %>%
+    dplyr::select(
+      acousticness, danceability, duration_ms, energy, instrumentalness,
+      liveness, loudness, speechiness, tempo, valence, popularity)
+)
+```
+
+
+Next we examine the top 15 genres and plot them in a bar plot. The purpose of this is to determine which categories dominate the dataset. This matters from an analysis standpoint because if there is a highly concentrated number of songs from one or two genres, those categories can disproportionately shape the results. The graph shows that the top 15 genres are similar in number of songs.
+
+```{r}
+#finding the most frequent genres
+top_genres <- spotify %>%
+  dplyr::count(genre, sort = TRUE) %>%
+  dplyr::slice_head(n = 15)
+
+#plotting the top genres
+ggplot(top_genres, aes(x = reorder(genre, n), y = n)) +
+  geom_col(fill = "#1DB954", width = 0.8) +
+  coord_flip() +
+  labs(
+    title = "Top 15 Genres in the Dataset",
+    x = "Genre", y = "Number of Songs"
+  )
+```
+
+We also look at the top 15 genres by popularity to understand which genres tend to be the most popular, regardless of frequency/count. The graph shows that, on average, Pop, Rap and Rock songs have the highest popularity.
+
+```{r}
+#comparing average popularity across genres
+genre_popularity <- spotify %>%
+  dplyr::group_by(genre) %>%
+  dplyr::summarise(
+    avg_popularity = mean(popularity, na.rm = TRUE),
+    count = dplyr::n(), .groups = "drop"
+  ) %>%
+  dplyr::arrange(desc(avg_popularity)) %>%
+  dplyr::slice_head(n = 15)
+
+ggplot(genre_popularity, aes(x = reorder(genre, avg_popularity), y = avg_popularity)) +
+  geom_col(fill = "#1DB954", width = 0.8) +
+  coord_flip() +
+  labs(
+    title = "Top Genres by Average Popularity",
+    x = "Genre", y = "Average Popularity"
+  )
+
+```
+
+Next we examine the data on genre-level. The table below aggregates average values of dancebility, energy, valence, acousticness, loudness, tempo and count to see what trends there are among the different genres. This helps us see that each genre carries distinct characteristics: for instance, some genres are more energetic and dancable, while others are more acoustic. Note that in the output, only 6 genres are shown.
+
+```{r}
+genre_feature_summary <- spotify %>%
+  dplyr::group_by(genre) %>%
+  dplyr::summarise(
+    danceability = mean(danceability, na.rm = TRUE),
+    energy = mean(energy, na.rm = TRUE),
+    valence = mean(valence, na.rm = TRUE),
+    acousticness = mean(acousticness, na.rm = TRUE),
+    loudness = mean(loudness, na.rm = TRUE),
+    tempo = mean(tempo, na.rm = TRUE),
+    count = dplyr::n(), .groups = "drop"
+  )
+
+head(genre_feature_summary)
+```
+
+Finally, we create a correlation matrix to understand which song characteristics are most correlated with each other.
+
+```{r}
+numeric_features <- spotify %>%
+  dplyr::select(
+    acousticness, danceability, duration_ms, energy, instrumentalness,
+    liveness, loudness, speechiness, tempo, valence, popularity)
+
+cor_matrix <- cor(numeric_features, use = "complete.obs")
+
+corrplot::corrplot(cor_matrix, method = "color", type = "upper", tl.cex = 0.8)
+```
+
+#### Key Takeaways from Exploratory Analysis
+
+The exploratory data analysis suggests that the prediction problem is well-structured because the target classes are very balanced. After converting popularity into a binary outcome, the dataset contains about 49.0% "not popular" songs and 51.0% "popular" songs, so neither class dominates the sample. This is important from a business perspective because it means later model results are less likely to be distorted by class imbalance. In other words, if a model performs well, that performance is more likely to reflect real differences in song characteristics rather than simply benefiting from an uneven split in the outcome variable. The summary statistics also show that the typical song in the dataset is moderately danceable, moderately energetic, and about 3.7 minutes long, which gives a useful baseline for understanding what a “normal” track looks like in this sample.
+
+A second major takeaway is that the dataset is not heavily concentrated in just one genre, at least among the top categories. The report notes that the top 15 genres appear relatively similar in number of songs, which is helpful because it reduces the risk that one genre overwhelmingly drives the analysis. At the same time, the genre-level summaries show that musical features vary meaningfully across categories. For example, classical songs have much lower danceability and energy but much higher acousticness, while children’s music appears more upbeat and accessible on average. This tells us that genre is likely to matter in predicting popularity, not only because genres differ in audience appeal, but also because they capture underlying differences in the musical profile of songs.
+
+Finally, the exploratory data analysis shows that popularity is probably influenced by a combination of musical attributes rather than any single factor alone. The genre comparisons indicate that some genres tend to be more energetic and danceable, while others are more acoustic or subdued, so the model will likely need to recognize patterns across several features at once. For a manager, the practical implication is that popularity does not appear random: it is connected to measurable song characteristics and to the type of music being produced. That makes the dataset suitable for predictive modeling and supports the broader business value of the project, since the analysis suggests it should be possible to identify the kinds of songs that are more likely to become popular.
+
+### Spliting Data
+
+To evaluate model performance, we partition the dataset into training and test sets. Specifically, we randomly assign 50% of the observations to the training set and the remaining 50% to the test set. We maintain two versions of the data throughout this process: a non-scaled dataset for models that do not require feature normalization (e.g., logistic regression, decision trees, and random forests), and a scaled dataset for models that are sensitive to differences in feature magnitude (e.g., kNN, neural networks, and SVM). Both versions are split using the same indices to ensure consistency across model comparisons.
+
+```{r}
+ratio <- 0.5
+set.seed(12345)
+
+train_rows <- sample(1:nrow(spotify_dummy), ratio*nrow(spotify_dummy))
+
+#non-scaled data
+spotify_train <- spotify_dummy[train_rows, ]
+spotify_test <- spotify_dummy[-train_rows, ]
+
+#scaled data
+spotify_scale_train <- spotify_scale[train_rows, ]
+spotify_scale_test <- spotify_scale[-train_rows, ]
+```
+
+
+### Build Models
+
+#### Logistic Regression
+
+Logistic regression serves as a baseline model for this analysis. It estimates the probability that a song is popular as a function of its features, assuming a linear relationship between the predictors and the log-odds of popularity. 
+
+```{r, cache=TRUE}
+logistic_model <- glm(popular_binary ~ ., data=spotify_train, family = "binomial")
+summary(logistic_model)
+```
+
+#### KNN
+
+The k-nearest neighbors model classifies songs based on the popularity of the most similar observations in the training data. Using a distance-based approach, kNN assigns a class based on the majority label among the k closest neighbors.
+
+```{r, cache=TRUE}
+knn_model <- knn(
+  train = spotify_scale_train[, !(names(spotify_scale_train) %in% c("popular_binary"))],
+  test  = spotify_scale_test[, !(names(spotify_scale_test) %in% c("popular_binary"))],
+  cl    = as.factor(spotify_scale_train$popular_binary), k = 7, prob  = TRUE)
+
+summary(knn_model)
+```
+
+#### Decision Tree
+
+The decision tree model creates a set of decision rules that classify songs as popular or not. This approach allows us to understand which features, such as genre or acoustic attributes, are most influential in determining popularity.
+
+```{r, cache=TRUE}
+dt_model <- C5.0(as.factor(popular_binary) ~ ., data = spotify_train)
+plot(dt_model)
+
+summary(dt_model)
+```
+
+#### Random Forest
+
+Random forest builds on the decision tree framework by combining many trees trained on bootstrapped samples of the data. By averaging across multiple trees, the model improves predictive performance.
+
+```{r, cache=TRUE}
+rf_model <- randomForest(as.factor(popular_binary) ~ ., data = spotify_train)
+
+summary(rf_model)
+print(rf_model)
+varImpPlot(rf_model)
+```
+
+#### ANN
+
+The neural network model captures complex, nonlinear relationships between song features and popularity. By passing inputs through hidden layers of interconnected nodes, the model can learn patterns that are not easily captured by linear or tree-based methods.
+
+```{r, cache=TRUE}
+set.seed(12345)
+ann_model <- neuralnet(
+  popular_binary ~ .,
+  data = spotify_scale_train,
+  hidden = c(5),
+  stepmax = 1e6,
+  linear.output = FALSE)
+
+plot(ann_model)
+```
+
+#### SVM
+
+The support vector machine uses a kernel-based approach to classify songs by finding an optimal boundary that separates popular and non-popular tracks. The radial basis function (RBF) kernel allows the model to capture nonlinear relationships in the data.
+
+```{r, cache=TRUE}
+set.seed(12345)
+svmrbfdot_model <- ksvm(as.factor(popular_binary) ~ ., data = spotify_scale_train, kernel = "rbfdot", prob.model = TRUE)
+```
+
+
+### Generating Predictions
+
+Using the trained models, we generate predictions on the test dataset to evaluate out-of-sample performance. For each model, we obtain predicted probabilities that a song is classified as “popular.” To facilitate evaluation, we also convert predicted probabilities into binary classifications using a threshold of 0.5, where songs with predicted probabilities above the threshold are classified as popular. For models that directly produce class labels, such as kNN and decision trees, we extract both the predicted classes and the associated probabilities where available.
+
+#### Logistic Regression
+
+```{r, cache=TRUE}
+logistic_predictions <- predict(logistic_model, spotify_test, type = "response")
+logistic_binpred <- ifelse(logistic_predictions >= 0.5, 1, 0)
+```
+
+#### KNN
+
+```{r, cache=TRUE}
+knn_prob <- attr(knn_model, "prob")
+knn_predictions <- ifelse(as.character(knn_model) == "1", knn_prob, 1 - knn_prob)
+summary(knn_predictions)
+rm(knn_prob)
+
+knn_binpred <- knn_model
+```
+
+#### Decision Tree
+
+```{r, cache=TRUE}
+dt_pred <- predict(dt_model, spotify_test,  type = "prob")
+dt_predictions <- dt_pred[, "1"]
+summary(dt_predictions)
+
+dt_binpred <- predict(dt_model, spotify_test)
+```
+
+#### Random Forest
+
+```{r, cache=TRUE}
+rf_pred <- predict(rf_model,  spotify_test, type = "prob")
+rf_predictions <- rf_pred[, "1"]
+summary(rf_predictions)
+
+rf_binpred <- predict(rf_model,  spotify_test)
+```
+
+#### ANN 
+
+```{r, cache=TRUE}
+ann_pred <- neuralnet::compute(
+  ann_model,
+  spotify_scale_test[, names(spotify_scale_test) != "popular_binary"])$net.result
+
+ann_predictions <- as.vector(ann_pred)
+summary(ann_predictions)
+ann_binpred <- ifelse(ann_predictions > 0.5, 1, 0)
+```
+
+#### SVM
+
+```{r, cache=TRUE}
+svm_pred <- predict(
+  svmrbfdot_model, spotify_scale_test[, names(spotify_scale_test) != "popular_binary"],
+  type = "prob")
+
+svm_binpred <- predict(
+  svmrbfdot_model, spotify_scale_test[, names(spotify_scale_test) != "popular_binary"],
+  type = "response")
+
+svm_predictions <- svm_pred[, "1"]
+```
+
+
+### Evaluate Models
+
+```{r, cache=TRUE}
+#logistic regression 
+logistic_confus <- confusionMatrix(
+  factor(logistic_binpred, levels = c(0, 1)),
+  factor(spotify_test$popular_binary, levels = c(0, 1)),
+  positive = "1")
+
+logistic_confus
+```
+
+```{r, cache=TRUE}
+#knn
+knn_confus <- confusionMatrix(
+  factor(knn_binpred, levels = c(0, 1)),
+  factor(spotify_test$popular_binary, levels = c(0, 1)),
+  positive = "1")
+
+knn_confus
+```
+
+```{r, cache=TRUE}
+#decision tree
+dt_confus <- confusionMatrix(
+  factor(dt_binpred, levels = c(0, 1)),
+  factor(spotify_test$popular_binary, levels = c(0, 1)),
+  positive = "1"
+)
+dt_confus
+```
+
+```{r, cache=TRUE}
+#random forest
+rf_confus <- confusionMatrix(
+  factor(rf_binpred, levels = c(0, 1)),
+  factor(spotify_test$popular_binary, levels = c(0, 1)),
+  positive = "1"
+)
+rf_confus
+```
+
+```{r}
+#ANN
+ann_confus <- confusionMatrix(
+  factor(ann_binpred, levels = c(0, 1)),
+  factor(spotify_test$popular_binary, levels = c(0, 1)),
+  positive = "1"
+)
+ann_confus
+
+```
+
+```{r}
+#SVM
+svm_confus <- confusionMatrix(
+  factor(svm_binpred, levels = c(0, 1)),
+  factor(spotify_test$popular_binary, levels = c(0, 1)),
+  positive = "1"
+)
+svm_confus
+```
+
+
+```{r}
+#comparing first-level models
+model_comparison <- data.frame(
+  Model = c("Logistic", "kNN", "Decision Tree", "Random Forest", "ANN", "SVM"),
+  Accuracy = c(
+    logistic_confus$overall["Accuracy"],
+    knn_confus$overall["Accuracy"],
+    dt_confus$overall["Accuracy"],
+    rf_confus$overall["Accuracy"],
+    ann_confus$overall["Accuracy"],
+    svm_confus$overall["Accuracy"]
+  ),
+  Kappa = c(
+    logistic_confus$overall["Kappa"],
+    knn_confus$overall["Kappa"],
+    dt_confus$overall["Kappa"],
+    rf_confus$overall["Kappa"],
+    ann_confus$overall["Kappa"],
+    svm_confus$overall["Kappa"]
+  ),
+  Sensitivity = c(
+    logistic_confus$byClass["Sensitivity"],
+    knn_confus$byClass["Sensitivity"],
+    dt_confus$byClass["Sensitivity"],
+    rf_confus$byClass["Sensitivity"],
+    ann_confus$byClass["Sensitivity"],
+    svm_confus$byClass["Sensitivity"]
+  )
+)
+
+model_comparison
+```
+
+```{r}
+#creating dataframe of predictions across all models
+stacked_df <- data.frame(
+  logit_pred = as.numeric(logistic_predictions),
+  knn_pred   = as.numeric(knn_predictions),
+  ann_pred   = as.numeric(ann_predictions),
+  svm_pred   = as.numeric(svm_predictions),
+  tree_pred  = as.numeric(dt_predictions),
+  rf_pred    = as.numeric(rf_predictions),
+  y          = factor(spotify_test$popular_binary, levels = c(0, 1))
+)
+
+#splitting 70/30
+ratio <- 0.7
+set.seed(12345)
+train_rows_stack <- sample(1:nrow(stacked_df), ratio*nrow(stacked_df))
+
+#training and test sets for non-scaled data
+stack_train <- stacked_df[train_rows_stack, ]
+stack_test <- stacked_df[-train_rows_stack, ]
+
+#cost matrix
+cost_matrix <- matrix(
+  c(0, 5,
+    1, 0),
+  nrow = 2,
+  byrow = TRUE,
+  dimnames = list(predicted = c("0", "1"),
+                  actual = c("0", "1")))
+```
+
+```{r}
+#Probability model (no cost matrix)
+stack_model_prob <- C5.0(
+  x = stack_train[, names(stack_train) != "y"],
+  y = stack_train$y)
+
+#predictions
+stack_prob <- predict(
+  stack_model_prob,
+  stack_test[, names(stack_test) != "y"],
+  type = "prob")[, "1"]
+
+#creating binary from prediction
+stack_pred_prob <- ifelse(stack_prob >= 0.5, 1, 0)
+
+#confusion matrix
+stack_confus_prob <- confusionMatrix(
+  factor(stack_pred_prob, levels = c(0, 1)),
+  factor(stack_test$y, levels = c(0, 1)),
+  positive = "1")
+
+stack_confus_prob
+
+```
+
+
+```{r}
+#cost sensitive classification model
+stack_model_cost <- C5.0(
+  x = stack_train[, names(stack_train) != "y"],
+  y = stack_train$y,
+  costs = cost_matrix)
+
+#predictions
+stack_pred <- predict(
+  stack_model_cost,
+  stack_test[, names(stack_test) != "y"])
+
+stack_confus <- confusionMatrix(
+  factor(stack_pred, levels = c(0, 1)),
+  factor(stack_test$y, levels = c(0, 1)),
+  positive = "1")
+
+stack_confus
+```
+
+
+```{r}
+
+#adding stacked model for model comparison
+model_comparison <- rbind(
+  model_comparison,
+  data.frame(
+    Model = "Stacked (Prob, 0.5 threshold)",
+    Accuracy = stack_confus_prob$overall["Accuracy"],
+    Kappa = stack_confus_prob$overall["Kappa"],
+    Sensitivity = stack_confus_prob$byClass["Sensitivity"]),
+  data.frame(
+    Model = "Stacked (Cost-sensitive)",
+    Accuracy = stack_confus$overall["Accuracy"],
+    Kappa = stack_confus$overall["Kappa"],
+    Sensitivity = stack_confus$byClass["Sensitivity"])
+)
+model_comparison
+```
+
