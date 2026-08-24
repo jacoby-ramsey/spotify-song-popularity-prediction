@@ -1,0 +1,552 @@
+---
+title: 'Spotify Popularity: Exploratory Data Analysis'
+author: "Jacoby Ramsey"
+date: "`r format(Sys.Date(), '%Y-%m-%d')`"
+output:
+  pdf_document:
+    toc: true
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: show
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width = 9,
+  fig.height = 5.5,
+  dpi = 120
+)
+```
+
+# Purpose
+
+This report focuses only on exploratory data analysis (EDA). The goal is to understand the structure of the Spotify dataset, examine the distribution of popularity, identify differences across genres, and explore how measurable audio characteristics relate to popularity before any predictive modeling is performed.
+
+The analysis uses the complete dataset for descriptive and exploratory work. The 20% modeling sample used in the predictive-modeling report is not used here.
+
+# Load Packages
+
+```{r libraries}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(janitor)
+library(scales)
+library(corrplot)
+```
+
+# Visual Theme
+
+```{r theme}
+theme_spotify <- function() {
+  theme_minimal(base_size = 12) +
+    theme(
+      plot.background = element_rect(fill = "#121212", color = NA),
+      panel.background = element_rect(fill = "#181818", color = NA),
+      panel.border = element_blank(),
+      panel.grid.major = element_line(color = "#2A2A2A", linewidth = 0.4),
+      panel.grid.minor = element_blank(),
+      axis.text = element_text(color = "#B3B3B3"),
+      axis.title = element_text(color = "#F5F5F5", face = "bold"),
+      plot.title = element_text(color = "#1DB954", face = "bold", size = 16),
+      plot.subtitle = element_text(color = "#D9D9D9", size = 11),
+      plot.caption = element_text(color = "#B3B3B3", size = 9),
+      legend.background = element_rect(fill = "#181818", color = NA),
+      legend.key = element_rect(fill = "#181818", color = NA),
+      legend.text = element_text(color = "#F5F5F5"),
+      legend.title = element_text(color = "#1DB954", face = "bold"),
+      strip.background = element_rect(fill = "#1DB954", color = NA),
+      strip.text = element_text(color = "#121212", face = "bold")
+    )
+}
+```
+
+# Load Data
+
+```{r load-data}
+spotify <- read.csv("SpotifyFeatures.csv", stringsAsFactors = TRUE)
+
+nrow(spotify)
+ncol(spotify)
+```
+
+The dataset contains `r comma(nrow(spotify))` observations and `r ncol(spotify)` original variables.
+
+# Data Structure
+
+```{r structure}
+str(spotify)
+summary(spotify)
+```
+
+This output provides the data type of each variable and basic descriptive statistics. The dataset includes song identifiers, genre information, popularity scores, and multiple continuous audio characteristics.
+
+# Missing Values
+
+```{r missing-values}
+missing_summary <- data.frame(
+  variable = names(spotify),
+  missing = colSums(is.na(spotify))
+) %>%
+  mutate(percent_missing = 100 * missing / nrow(spotify)) %>%
+  arrange(desc(missing))
+
+knitr::kable(missing_summary, digits = 2, caption = "Missing Values by Variable")
+```
+
+```{r missing-plot}
+ggplot(missing_summary, aes(x = reorder(variable, percent_missing), y = percent_missing)) +
+  geom_col(fill = "#1DB954") +
+  coord_flip() +
+  labs(
+    title = "Missingness by Variable",
+    x = NULL,
+    y = "Percent Missing"
+  ) +
+  theme_spotify()
+```
+
+The dataset contains no missing values if all percentages above are zero. This reduces the need for imputation and simplifies subsequent analysis.
+
+# Duplicate Track IDs
+
+Because the same Spotify track can appear more than once in the dataset, it is useful to examine repeated track IDs before interpreting song-level counts.
+
+```{r duplicate-tracks}
+duplicate_summary <- spotify %>%
+  count(track_id, sort = TRUE) %>%
+  summarise(
+    unique_track_ids = n(),
+    repeated_track_ids = sum(n > 1),
+    maximum_repetitions = max(n)
+  )
+
+knitr::kable(duplicate_summary, caption = "Track ID Duplication Summary")
+```
+
+```{r top-repeated-tracks}
+top_repeated <- spotify %>%
+  count(track_id, track_name, artist_name, sort = TRUE) %>%
+  slice_head(n = 10)
+
+knitr::kable(top_repeated, caption = "Most Frequently Repeated Tracks")
+```
+
+This check helps determine whether repeated songs could influence descriptive results. Repeated entries are not automatically errors; they may reflect how the source dataset was assembled or how tracks are represented across categories.
+
+# Popularity Distribution
+
+```{r popularity-summary}
+median_popularity <- median(spotify$popularity, na.rm = TRUE)
+
+popularity_summary <- spotify %>%
+  summarise(
+    minimum = min(popularity),
+    q1 = quantile(popularity, 0.25),
+    median = median(popularity),
+    mean = mean(popularity),
+    q3 = quantile(popularity, 0.75),
+    maximum = max(popularity),
+    sd = sd(popularity)
+  )
+
+knitr::kable(popularity_summary, digits = 2, caption = "Popularity Summary Statistics")
+```
+
+```{r popularity-histogram}
+ggplot(spotify, aes(x = popularity)) +
+  geom_histogram(binwidth = 2, fill = "#1DB954", color = "#121212") +
+  geom_vline(xintercept = median_popularity, linetype = "dashed", linewidth = 1) +
+  labs(
+    title = "Distribution of Spotify Popularity Scores",
+    subtitle = paste("Dashed line = median popularity of", median_popularity),
+    x = "Popularity Score",
+    y = "Number of Songs"
+  ) +
+  theme_spotify()
+```
+
+The popularity distribution shows how songs are spread across Spotify's popularity scale. The median is also used to create the binary popularity outcome used in the predictive-modeling analysis.
+
+# Binary Popularity Classification
+
+```{r popularity-binary}
+spotify_eda <- spotify %>%
+  mutate(
+    popular_binary = if_else(popularity >= median_popularity, 1L, 0L),
+    popularity_group = factor(
+      popular_binary,
+      levels = c(0, 1),
+      labels = c("Not Popular", "Popular")
+    )
+  )
+
+class_balance <- spotify_eda %>%
+  count(popularity_group) %>%
+  mutate(percent = 100 * n / sum(n))
+
+knitr::kable(class_balance, digits = 2, caption = "Popularity Class Balance")
+```
+
+```{r class-balance-plot}
+ggplot(class_balance, aes(x = popularity_group, y = n, fill = popularity_group)) +
+  geom_col(show.legend = FALSE) +
+  geom_text(aes(label = paste0(comma(n), "\n", round(percent, 1), "%")),
+            vjust = -0.3, color = "white") +
+  labs(
+    title = "Popular vs. Not-Popular Songs",
+    x = NULL,
+    y = "Number of Songs"
+  ) +
+  theme_spotify()
+```
+
+A nearly even class distribution is useful because later classification accuracy is less likely to be driven simply by one class being much larger than the other.
+
+# Genre Composition
+
+```{r genre-counts}
+genre_counts <- spotify %>%
+  count(genre, sort = TRUE)
+
+knitr::kable(head(genre_counts, 15), caption = "Top 15 Genres by Number of Songs")
+```
+
+```{r genre-count-plot}
+top_genres <- genre_counts %>% slice_head(n = 15)
+
+ggplot(top_genres, aes(x = reorder(genre, n), y = n)) +
+  geom_col(fill = "#1DB954", width = 0.8) +
+  coord_flip() +
+  scale_y_continuous(labels = comma) +
+  labs(
+    title = "Top 15 Genres in the Dataset",
+    x = "Genre",
+    y = "Number of Songs"
+  ) +
+  theme_spotify()
+```
+
+The genre counts help determine whether the dataset is concentrated in only a few categories. Similar genre counts reduce the risk that the descriptive results are dominated by one genre alone.
+
+# Popularity by Genre
+
+```{r genre-popularity}
+genre_popularity <- spotify %>%
+  group_by(genre) %>%
+  summarise(
+    average_popularity = mean(popularity, na.rm = TRUE),
+    median_popularity = median(popularity, na.rm = TRUE),
+    song_count = n(),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(average_popularity))
+
+knitr::kable(head(genre_popularity, 15), digits = 2,
+             caption = "Top Genres by Average Popularity")
+```
+
+```{r genre-popularity-plot}
+genre_popularity %>%
+  slice_head(n = 15) %>%
+  ggplot(aes(x = reorder(genre, average_popularity), y = average_popularity)) +
+  geom_col(fill = "#1DB954") +
+  coord_flip() +
+  labs(
+    title = "Top Genres by Average Popularity",
+    x = "Genre",
+    y = "Average Popularity"
+  ) +
+  theme_spotify()
+```
+
+```{r genre-boxplots}
+top_10_genres <- genre_counts %>%
+  slice_head(n = 10) %>%
+  pull(genre)
+
+spotify %>%
+  filter(genre %in% top_10_genres) %>%
+  ggplot(aes(x = reorder(genre, popularity, median), y = popularity)) +
+  geom_boxplot(fill = "#1DB954", outlier.alpha = 0.15) +
+  coord_flip() +
+  labs(
+    title = "Popularity Distribution Across the 10 Most Common Genres",
+    subtitle = "Boxplots show within-genre variation, not only genre averages",
+    x = "Genre",
+    y = "Popularity"
+  ) +
+  theme_spotify()
+```
+
+The bar chart compares average popularity, while the boxplots show the full distribution within major genres. This distinction is important because two genres can have similar averages while having very different spreads and medians.
+
+# Audio Feature Summary
+
+```{r feature-summary}
+audio_features <- c(
+  "acousticness", "danceability", "duration_ms", "energy",
+  "instrumentalness", "liveness", "loudness", "speechiness",
+  "tempo", "valence"
+)
+
+feature_summary <- spotify %>%
+  summarise(across(
+    all_of(audio_features),
+    list(
+      mean = ~mean(.x, na.rm = TRUE),
+      median = ~median(.x, na.rm = TRUE),
+      sd = ~sd(.x, na.rm = TRUE)
+    )
+  )) %>%
+  pivot_longer(
+    everything(),
+    names_to = c("feature", ".value"),
+    names_pattern = "(.+)_(mean|median|sd)$"
+  )
+
+knitr::kable(feature_summary, digits = 3, caption = "Audio Feature Summary Statistics")
+```
+
+# Audio Feature Distributions
+
+Because the audio variables use different scales, faceting each variable with a free x-axis makes their shapes easier to compare.
+
+```{r feature-distributions}
+spotify %>%
+  select(all_of(audio_features)) %>%
+  pivot_longer(everything(), names_to = "feature", values_to = "value") %>%
+  ggplot(aes(x = value)) +
+  geom_histogram(bins = 40, fill = "#1DB954", color = "#121212") +
+  facet_wrap(~ feature, scales = "free", ncol = 2) +
+  labs(
+    title = "Distributions of Spotify Audio Features",
+    x = NULL,
+    y = "Number of Songs"
+  ) +
+  theme_spotify()
+```
+
+These distributions help identify skewness, extreme observations, and features whose typical values differ substantially from their ranges.
+
+# Audio Characteristics: Popular vs. Not Popular
+
+```{r group-feature-comparison}
+group_feature_summary <- spotify_eda %>%
+  group_by(popularity_group) %>%
+  summarise(
+    across(
+      all_of(audio_features),
+      ~mean(.x, na.rm = TRUE)
+    ),
+    .groups = "drop"
+  ) %>%
+  pivot_longer(
+    cols = -popularity_group,
+    names_to = "feature",
+    values_to = "mean_value"
+  )
+
+knitr::kable(group_feature_summary, digits = 3,
+             caption = "Mean Audio Characteristics by Popularity Group")
+```
+
+For clearer visual comparison, the following plot standardizes each audio characteristic before comparing popular and not-popular songs. Standardization is used here only for visualization; it does not alter the original data.
+
+```{r standardized-group-comparison}
+standardized_features <- spotify_eda %>%
+  select(popularity_group, all_of(audio_features)) %>%
+  mutate(across(all_of(audio_features), ~as.numeric(scale(.x)))) %>%
+  pivot_longer(
+    cols = all_of(audio_features),
+    names_to = "feature",
+    values_to = "standardized_value"
+  ) %>%
+  group_by(popularity_group, feature) %>%
+  summarise(mean_standardized = mean(standardized_value, na.rm = TRUE), .groups = "drop")
+
+ggplot(standardized_features,
+       aes(x = feature, y = mean_standardized, fill = popularity_group)) +
+  geom_col(position = "dodge") +
+  coord_flip() +
+  labs(
+    title = "Standardized Audio Profiles by Popularity Group",
+    subtitle = "Positive values are above the full-dataset average; negative values are below it",
+    x = NULL,
+    y = "Mean Standardized Value",
+    fill = "Popularity Group"
+  ) +
+  theme_spotify()
+```
+
+This plot highlights which audio characteristics differ most between the two popularity groups while putting all variables on a common visual scale.
+
+# Selected Feature Relationships with Popularity
+
+To make scatterplots readable with more than 230,000 observations, a reproducible random sample is used only for visualization. Summary statistics elsewhere in this report continue to use the complete dataset.
+
+```{r scatter-sample}
+set.seed(12345)
+
+spotify_plot_sample <- spotify %>%
+  slice_sample(n = min(15000, nrow(spotify)))
+```
+
+```{r danceability-popularity}
+ggplot(spotify_plot_sample, aes(x = danceability, y = popularity)) +
+  geom_point(alpha = 0.12, size = 0.8, color = "#1DB954") +
+  geom_smooth(method = "loess", se = FALSE, linewidth = 1) +
+  labs(
+    title = "Danceability and Popularity",
+    subtitle = "Random sample used only to improve plot readability",
+    x = "Danceability",
+    y = "Popularity"
+  ) +
+  theme_spotify()
+```
+
+```{r loudness-popularity}
+ggplot(spotify_plot_sample, aes(x = loudness, y = popularity)) +
+  geom_point(alpha = 0.12, size = 0.8, color = "#1DB954") +
+  geom_smooth(method = "loess", se = FALSE, linewidth = 1) +
+  labs(
+    title = "Loudness and Popularity",
+    subtitle = "Random sample used only to improve plot readability",
+    x = "Loudness (dB)",
+    y = "Popularity"
+  ) +
+  theme_spotify()
+```
+
+```{r energy-popularity}
+ggplot(spotify_plot_sample, aes(x = energy, y = popularity)) +
+  geom_point(alpha = 0.12, size = 0.8, color = "#1DB954") +
+  geom_smooth(method = "loess", se = FALSE, linewidth = 1) +
+  labs(
+    title = "Energy and Popularity",
+    subtitle = "Random sample used only to improve plot readability",
+    x = "Energy",
+    y = "Popularity"
+  ) +
+  theme_spotify()
+```
+
+The smoothed trend lines are descriptive rather than causal. They show the direction and shape of association but do not establish that changing an audio characteristic would cause a change in popularity.
+
+# Correlation Analysis
+
+```{r correlation-matrix}
+numeric_features <- spotify %>%
+  select(
+    acousticness, danceability, duration_ms, energy,
+    instrumentalness, liveness, loudness, speechiness,
+    tempo, valence, popularity
+  )
+
+cor_matrix <- cor(numeric_features, use = "complete.obs")
+
+corrplot(
+  cor_matrix,
+  method = "color",
+  type = "upper",
+  tl.cex = 0.8,
+  addCoef.col = "black",
+  number.cex = 0.55
+)
+```
+
+```{r popularity-correlations}
+popularity_correlations <- data.frame(
+  feature = rownames(cor_matrix),
+  correlation_with_popularity = cor_matrix[, "popularity"]
+) %>%
+  filter(feature != "popularity") %>%
+  arrange(desc(abs(correlation_with_popularity)))
+
+knitr::kable(popularity_correlations, digits = 3,
+             caption = "Correlations with Popularity")
+```
+
+Correlation measures linear association. A low correlation does not necessarily mean a feature has no predictive value, particularly when relationships are nonlinear or interact with genre.
+
+# Genre-Level Audio Profiles
+
+```{r genre-feature-summary}
+genre_feature_summary <- spotify %>%
+  group_by(genre) %>%
+  summarise(
+    danceability = mean(danceability, na.rm = TRUE),
+    energy = mean(energy, na.rm = TRUE),
+    valence = mean(valence, na.rm = TRUE),
+    acousticness = mean(acousticness, na.rm = TRUE),
+    loudness = mean(loudness, na.rm = TRUE),
+    tempo = mean(tempo, na.rm = TRUE),
+    popularity = mean(popularity, na.rm = TRUE),
+    count = n(),
+    .groups = "drop"
+  )
+
+knitr::kable(genre_feature_summary, digits = 2,
+             caption = "Genre-Level Audio and Popularity Summary")
+```
+
+```{r genre-heatmap}
+genre_heatmap <- genre_feature_summary %>%
+  filter(count >= 500) %>%
+  select(genre, danceability, energy, valence, acousticness, loudness, tempo) %>%
+  mutate(across(-genre, ~as.numeric(scale(.x)))) %>%
+  pivot_longer(-genre, names_to = "feature", values_to = "z_score")
+
+ggplot(genre_heatmap, aes(x = feature, y = genre, fill = z_score)) +
+  geom_tile() +
+  labs(
+    title = "Standardized Audio Profiles Across Genres",
+    subtitle = "Genres with at least 500 observations; values are standardized across genres",
+    x = "Audio Feature",
+    y = "Genre",
+    fill = "Z-score"
+  ) +
+  theme_spotify()
+```
+
+The heatmap makes it easier to see how genres differ simultaneously across multiple musical characteristics rather than comparing one feature at a time.
+
+# Popularity Variation Within Genre
+
+A genre can have a high average popularity while still containing substantial variation among its tracks. The coefficient of variation is not ideal for a bounded variable such as popularity, so this section instead compares the interquartile range (IQR) of popularity across genres.
+
+```{r genre-variation}
+genre_variation <- spotify %>%
+  group_by(genre) %>%
+  summarise(
+    median_popularity = median(popularity),
+    iqr_popularity = IQR(popularity),
+    min_popularity = min(popularity),
+    max_popularity = max(popularity),
+    n = n(),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(iqr_popularity))
+
+knitr::kable(genre_variation, digits = 2,
+             caption = "Within-Genre Variation in Popularity")
+```
+
+This table helps distinguish genres with consistently similar popularity from genres that contain both very low- and very high-popularity songs.
+
+# Key Findings
+
+The exploratory analysis should be interpreted as descriptive evidence rather than causal evidence. The most important conclusions to carry into any later modeling are:
+
+1. The popularity classes created using the median threshold are close to evenly balanced.
+2. Genre is likely to be an important explanatory variable because average popularity and audio characteristics vary substantially across genres.
+3. Popular and not-popular songs differ across several measurable audio characteristics, although no single feature appears sufficient to explain popularity by itself.
+4. Some audio features are strongly related to one another, so models that use several predictors simultaneously may capture information not visible in one-variable comparisons.
+5. Relationships between audio characteristics and popularity should be interpreted as associations. The dataset alone does not establish that changing a song characteristic causes higher popularity.
+6. Repeated track IDs should be considered when interpreting song-level counts, because the dataset contains fewer unique track IDs than total rows.
+
