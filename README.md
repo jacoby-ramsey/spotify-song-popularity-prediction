@@ -15,12 +15,14 @@ A separate exploratory data analysis examines patterns in Spotify track populari
 **[View the Exploratory Data Analysis](https://github.com/jacoby-ramsey/spotify-song-popularity-prediction/blob/09a7b5c9e95525701d924f2511b0ba5bdd000567/Explanatory_Data_Analysis/Explanatory_Data_Analysis.pdf)**
 
 The EDA explores:
-- Distribution of Spotify popularity scores
+
+- Distribution and class balance of Spotify popularity scores
 - Differences in audio characteristics between popular and non-popular songs
-- Popularity patterns across genres
-- Relationships between audio features and popularity
-- Correlations among song characteristics
-- Genre-level audio profiles and visualizations
+- Popularity patterns and variation across genres
+- Relationships between danceability, energy, loudness, and popularity
+- Correlations among audio characteristics and popularity
+- Standardized audio profiles across genres
+- Missing values and duplicate track IDs
 
 ## Business Question
 
