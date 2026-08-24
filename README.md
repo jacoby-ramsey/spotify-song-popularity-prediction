@@ -79,7 +79,6 @@ Key visualizations include:
 ## Repository Structure
 
 - `scripts/` - R analysis and modeling code
-- `images/` - project visualizations
 - `report/` - full machine learning project report
 - `data/` - dataset information and source documentation
 - `explanatory_data_analysis/` - exploratory data analysis and supporting visualizations
