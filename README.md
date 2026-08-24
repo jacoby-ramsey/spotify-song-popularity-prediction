@@ -1,18 +1,30 @@
-# spotify-song-popularity-prediction
-Machine learning analysis predicting Spotify song popularity using audio and genre features
+# Spotify Song Popularity Prediction
+
+Machine learning analysis predicting Spotify song popularity using audio and genre features.
 
 ## Overview
 
-This project examines whether Spotify audio and genre characteristics
-can be used to predict whether a song will be popular.
+This project examines whether Spotify audio and genre characteristics can be used to predict whether a song will be popular.
 
-The analysis uses a dataset containing more than 230,000 Spotify tracks
-and compares multiple machine learning approaches.
+The analysis uses a dataset containing more than 230,000 Spotify tracks and combines exploratory data analysis with multiple machine learning approaches.
+
+## Exploratory Data Analysis
+
+A separate exploratory data analysis examines patterns in Spotify track popularity, genre, and audio characteristics before predictive modeling.
+
+**[View the Exploratory Data Analysis](https://github.com/jacoby-ramsey/spotify-song-popularity-prediction/blob/09a7b5c9e95525701d924f2511b0ba5bdd000567/Explanatory_Data_Analysis/Explanatory_Data_Analysis.pdf)**
+
+The EDA explores:
+- Distribution of Spotify popularity scores
+- Differences in audio characteristics between popular and non-popular songs
+- Popularity patterns across genres
+- Relationships between audio features and popularity
+- Correlations among song characteristics
+- Genre-level audio profiles and visualizations
 
 ## Business Question
 
-Can characteristics of a song be used to identify tracks with a higher
-likelihood of popularity?
+Can characteristics of a song be used to identify tracks with a higher likelihood of popularity?
 
 ## Tools
 
@@ -25,8 +37,7 @@ likelihood of popularity?
 
 ## Dataset
 
-230,000+ Spotify tracks containing audio characteristics,
-genre information, and popularity measures.
+230,000+ Spotify tracks containing audio characteristics, genre information, and popularity measures.
 
 ## Analytical Process
 
@@ -49,15 +60,24 @@ genre information, and popularity measures.
 
 ## Results
 
-Summarize the strongest model and major findings here.
+Six classification models were developed and compared using a 46,000+ observation modeling sample.
+
+The strongest standard models achieved approximately 86.5% classification accuracy, while cost-sensitive modeling increased sensitivity to approximately 95.6% when greater emphasis was placed on identifying popular songs.
 
 ## Visualizations
 
-Add your model comparison and feature importance graphics here.
+Key visualizations include:
+- Popularity distributions
+- Genre popularity comparisons
+- Audio-feature relationships
+- Correlation analysis
+- Random Forest feature importance
+- Model performance comparisons
 
 ## Repository Structure
 
 - `scripts/` - R analysis and modeling code
 - `images/` - project visualizations
-- `report/` - full project report
-- `data/` - information about the dataset
+- `report/` - full machine learning project report
+- `data/` - dataset information and source documentation
+- `explanatory_data_analysis/` - exploratory data analysis and supporting visualizations
