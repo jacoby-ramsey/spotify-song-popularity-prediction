@@ -12,7 +12,7 @@ The analysis uses a dataset containing more than 230,000 Spotify tracks and comb
 
 A separate exploratory data analysis examines patterns in Spotify track popularity, genre, and audio characteristics before predictive modeling.
 
-**[View the Exploratory Data Analysis](https://github.com/jacoby-ramsey/spotify-song-popularity-prediction/blob/09a7b5c9e95525701d924f2511b0ba5bdd000567/Explanatory_Data_Analysis/Explanatory_Data_Analysis.pdf)**
+**[View the Exploratory Data Analysis](https://github.com/jacoby-ramsey/spotify-song-popularity-prediction/blob/facd67fd557bbaf63c86cdc18db34ea9515eec00/eda/Exploratory_Data_Analysis.pdf)**
 
 The EDA explores:
 
